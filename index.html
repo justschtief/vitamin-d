@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sensr ROM Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: instrument bench — 3D head + camera on the left, three protractor gauges on the right, motion trace below. */
+:root {
+  --bg: #F1F4F6;
+  --surface: #FFFFFF;
+  --ink: #13212B;
+  --muted: #5B6A75;
+  --line: #D3DBE0;
+  --accent: #0A6C97;
+  --ref: #DCEAF1;
+  --s1: #0A6C97;
+  --s2: #C2410C;
+  --s3: #6B48C2;
+  --warn: #B42318;
+  --ok: #157F3D;
+  --head: #C3CED5;
+  --font-display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D1418; --surface: #141E24; --ink: #E4EBEE; --muted: #8E9FAA; --line: #25333B;
+    --accent: #4DB2DF; --ref: #15303C; --s1: #4DB2DF; --s2: #F0894A; --s3: #A98BEB;
+    --warn: #F2675B; --ok: #4CC27A; --head: #3B4B55; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D1418; --surface: #141E24; --ink: #E4EBEE; --muted: #8E9FAA; --line: #25333B;
+  --accent: #4DB2DF; --ref: #15303C; --s1: #4DB2DF; --s2: #F0894A; --s3: #A98BEB;
+  --warn: #F2675B; --ok: #4CC27A; --head: #3B4B55; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-body);
+  padding: 20px 16px 40px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.brand { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.brand h1 { margin: 0; font: 700 26px/1.1 var(--font-display); letter-spacing: -0.02em; }
+.brand span { font: 500 12px var(--font-data); color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); font: 500 12px var(--font-data); color: var(--muted);
+}
+.chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.chip[data-state="tracking"] i { background: var(--ok); }
+.chip[data-state="lost"] i { background: var(--warn); }
+.chip[data-state="loading"] i { background: var(--accent); }
+
+.bench { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 860px) { .bench { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+
+.stage { position: relative; aspect-ratio: 4 / 3.4; max-width: 100%; overflow: hidden; }
+#three { position: absolute; inset: 0; }
+#three canvas { display: block; }
+.video-inset {
+  position: absolute; right: 12px; bottom: 12px; width: 30%; max-width: 200px; aspect-ratio: 4 / 3;
+  border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: var(--bg);
+}
+.video-inset video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.video-inset.mirror video { transform: scaleX(-1); }
+.video-inset .ph { position: absolute; inset: 0; display: grid; place-items: center; font: 11px var(--font-data); color: var(--muted); text-align: center; padding: 8px; }
+.stage-label { position: absolute; left: 14px; top: 12px; font: 500 11px var(--font-data); color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.demo-tag { position: absolute; left: 14px; bottom: 12px; font: 500 12px var(--font-data); color: var(--accent); }
+
+.controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+button {
+  font: 600 14px var(--font-body); padding: 9px 14px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); padding: 0 4px; }
+
+.gauges { display: grid; gap: 0; }
+.gauge { display: grid; grid-template-columns: minmax(0, 1fr) 150px; align-items: center; gap: 12px; padding: 14px 16px; }
+.gauge + .gauge { border-top: 1px solid var(--line); }
+@media (max-width: 420px) { .gauge { grid-template-columns: minmax(0, 1fr); } }
+.gauge svg { width: 100%; max-width: 280px; height: auto; display: block; }
+.g-title { font: 600 13px var(--font-display); letter-spacing: 0.02em; display: flex; align-items: center; gap: 8px; }
+.g-title b { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.g-live { font: 600 34px/1.05 var(--font-data); font-variant-numeric: tabular-nums; margin: 4px 0 6px; }
+.g-live small { font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 4px; }
+.g-max { font: 12px/1.6 var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
+.g-max strong { color: var(--ink); font-weight: 600; }
+
+.lower { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 860px) { .lower { grid-template-columns: minmax(0, 1fr); } }
+.p-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 12px 16px 0; }
+.p-head h2 { margin: 0; font: 600 14px var(--font-display); }
+.p-head span { font: 12px var(--font-data); color: var(--muted); }
+#trace { width: 100%; height: 180px; display: block; padding: 8px 8px 12px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 0 16px 12px; font: 12px var(--font-data); color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+.side { padding: 0 16px 14px; }
+.side ol { margin: 8px 0 0; padding-left: 20px; font-size: 14px; }
+.side ol li { margin-bottom: 4px; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.stat { border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; }
+.stat dt { font: 11px var(--font-data); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.stat dd { margin: 2px 0 0; font: 600 16px var(--font-data); font-variant-numeric: tabular-nums; }
+.log { margin: 12px 0 0; padding: 0; list-style: none; font: 12px/1.7 var(--font-data); color: var(--muted); }
+.log li strong { color: var(--warn); font-weight: 600; }
+.note { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+.err { color: var(--warn); font-size: 13px; padding: 0 12px 12px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <h1>Sensr</h1>
+      <span>Cervical ROM · camera prototype</span>
+    </div>
+    <div class="chip" id="status" data-state="idle"><i></i><span>Demo motion</span></div>
+  </header>
+
+  <section class="bench">
+    <div class="panel">
+      <div class="stage">
+        <div id="three"></div>
+        <div class="stage-label">Live head pose</div>
+        <div class="demo-tag" id="demoTag">Demo motion · start the camera to measure</div>
+        <div class="video-inset mirror" id="inset">
+          <video id="video" playsinline muted></video>
+          <div class="ph" id="ph">Camera off</div>
+        </div>
+      </div>
+      <div class="controls">
+        <button class="primary" id="btnStart">Start camera</button>
+        <button id="btnZero" disabled>Set neutral</button>
+        <button id="btnReset">Reset maxima</button>
+        <button id="btnCsv" disabled>Export CSV</button>
+        <label class="toggle"><input type="checkbox" id="mirror" checked> Mirror view</label>
+      </div>
+      <div class="err" id="err" hidden></div>
+    </div>
+
+    <div class="panel gauges" id="gauges"></div>
+  </section>
+
+  <section class="lower">
+    <div class="panel">
+      <div class="p-head"><h2>Motion trace</h2><span>last 10 s · ±90°</span></div>
+      <canvas id="trace"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--s1)"></i>Rotation (+L)</span>
+        <span><i style="background:var(--s2)"></i>Flex/Ext (+Ext)</span>
+        <span><i style="background:var(--s3)"></i>Lateral (+L)</span>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="p-head"><h2>Protocol</h2><span>seated, facing camera</span></div>
+      <div class="side">
+        <ol>
+          <li>Start the camera. Patient sits upright about 60 cm from the screen.</li>
+          <li>Patient looks straight ahead. Press <em>Set neutral</em>.</li>
+          <li>Move slowly to end range in each direction and back to centre.</li>
+        </ol>
+        <dl class="stats">
+          <div class="stat"><dt>Noise rot</dt><dd id="n0">–</dd></div>
+          <div class="stat"><dt>Noise flex</dt><dd id="n1">–</dd></div>
+          <div class="stat"><dt>Noise lat</dt><dd id="n2">–</dd></div>
+        </dl>
+        <p class="note">Noise is the spread over the last second. Read it while the head is held still.</p>
+        <ul class="log" id="log"></ul>
+        <p class="note">Runs entirely in this browser. No video leaves the device.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script type="module">
+const MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const $ = (id) => document.getElementById(id);
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const DEG = 180 / Math.PI;
+
+/* ---------- Axes: signed anatomical values. Rotation +L, Flex/Ext +Ext, Lateral +L ---------- */
+const AXES = [
+  { key: "rot", name: "Rotation", color: "--s1", neg: "R", pos: "L", refNeg: 80, refPos: 80, leftIsPos: true },
+  { key: "fe",  name: "Flexion / Extension", color: "--s2", neg: "Flex", pos: "Ext", refNeg: 50, refPos: 60, leftIsPos: false },
+  { key: "lat", name: "Lateral flexion", color: "--s3", neg: "R", pos: "L", refNeg: 45, refPos: 45, leftIsPos: true },
+];
+const state = {
+  live: { rot: 0, fe: 0, lat: 0 },
+  max: { rot: [0, 0], fe: [0, 0], lat: [0, 0] }, // [neg, pos] magnitudes
+  mode: "demo", tracking: false, R0: null, xSign: 1, signVotes: 0,
+  hist: [], samples: [], lastValid: null, mirror: true,
+};
+
+/* ---------- Gauges (SVG protractors) ---------- */
+const CX = 130, CY = 128, RAD = 100;
+const pt = (v, r) => [CX + r * Math.sin(v / DEG), CY - r * Math.cos(v / DEG)];
+function arcPath(a, b, r) {
+  const [x1, y1] = pt(a, r), [x2, y2] = pt(b, r);
+  return `M${x1.toFixed(1)} ${y1.toFixed(1)} A${r} ${r} 0 ${Math.abs(b - a) > 180 ? 1 : 0} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+}
+function buildGauge(ax) {
+  // display angle v: negative = left of arc
+  const leftRef = ax.leftIsPos ? ax.refPos : ax.refNeg, rightRef = ax.leftIsPos ? ax.refNeg : ax.refPos;
+  const leftLbl = ax.leftIsPos ? ax.pos : ax.neg, rightLbl = ax.leftIsPos ? ax.neg : ax.pos;
+  let ticks = "", labels = "";
+  for (let v = -90; v <= 90; v += 10) {
+    const long = v % 30 === 0;
+    const [x1, y1] = pt(v, RAD), [x2, y2] = pt(v, RAD - (long ? 10 : 5));
+    ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--muted)" stroke-width="${long ? 1.4 : 0.8}"/>`;
+    if (long) { const [lx, ly] = pt(v, RAD - 20); labels += `<text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono, monospace">${Math.abs(v)}</text>`; }
+  }
+  const el = document.createElement("div");
+  el.className = "gauge";
+  el.innerHTML = `
+    <svg viewBox="0 0 260 146" role="img" aria-label="${ax.name} gauge">
+      <path d="${arcPath(-leftRef, rightRef, RAD + 7)}" stroke="var(--ref)" stroke-width="12" fill="none"/>
+      <path d="${arcPath(-90, 90, RAD)}" stroke="var(--line)" stroke-width="1.5" fill="none"/>
+      ${ticks}${labels}
+      <text x="${CX - RAD - 4}" y="${CY + 16}" text-anchor="start" font-size="10" font-weight="600" fill="var(--ink)" font-family="IBM Plex Mono, monospace">${leftLbl}</text>
+      <text x="${CX + RAD + 4}" y="${CY + 16}" text-anchor="end" font-size="10" font-weight="600" fill="var(--ink)" font-family="IBM Plex Mono, monospace">${rightLbl}</text>
+      <polygon class="mL" points="0,0" fill="var(${ax.color})"/>
+      <polygon class="mR" points="0,0" fill="var(${ax.color})"/>
+      <line class="needle" x1="${CX}" y1="${CY}" x2="${CX}" y2="${CY - RAD + 14}" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="${CX}" cy="${CY}" r="5" fill="var(--ink)"/>
+    </svg>
+    <div>
+      <div class="g-title"><b style="background:var(${ax.color})"></b>${ax.name}</div>
+      <div class="g-live"><span class="v">0°</span><small class="d"></small></div>
+      <div class="g-max">Max ${ax.neg} <strong class="xn">0°</strong> · ref ${ax.refNeg}°<br>Max ${ax.pos} <strong class="xp">0°</strong> · ref ${ax.refPos}°</div>
+    </div>`;
+  ax.el = el; $("gauges").appendChild(el);
+}
+AXES.forEach(buildGauge);
+const marker = (v) => { const [a, b] = pt(v - 3, RAD + 15), [c, d] = pt(v + 3, RAD + 15), [e, f] = pt(v, RAD + 4); return `${a},${b} ${c},${d} ${e},${f}`; };
+function renderGauges() {
+  for (const ax of AXES) {
+    const val = state.live[ax.key], disp = ax.leftIsPos ? -val : val;
+    const v = Math.max(-90, Math.min(90, disp));
+    const [x, y] = pt(v, RAD - 14);
+    const n = ax.el.querySelector(".needle"); n.setAttribute("x2", x.toFixed(1)); n.setAttribute("y2", y.toFixed(1));
+    ax.el.querySelector(".v").textContent = `${Math.abs(val).toFixed(1)}°`;
+    ax.el.querySelector(".d").textContent = Math.abs(val) < 0.5 ? "" : (val > 0 ? ax.pos : ax.neg);
+    const [mn, mp] = state.max[ax.key];
+    ax.el.querySelector(".xn").textContent = `${mn.toFixed(1)}°`;
+    ax.el.querySelector(".xp").textContent = `${mp.toFixed(1)}°`;
+    const leftMax = ax.leftIsPos ? mp : mn, rightMax = ax.leftIsPos ? mn : mp;
+    const mL = ax.el.querySelector(".mL"), mR = ax.el.querySelector(".mR");
+    mL.setAttribute("points", marker(-Math.min(90, leftMax))); mL.style.opacity = leftMax > 0.5 ? 1 : 0;
+    mR.setAttribute("points", marker(Math.min(90, rightMax))); mR.style.opacity = rightMax > 0.5 ? 1 : 0;
+  }
+}
+
+/* ---------- Three.js head ---------- */
+const host = $("three");
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+host.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+cam.position.set(2.4, 1.5, 7.2); cam.lookAt(0, 0.45, 0);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.85));
+const sun = new THREE.DirectionalLight(0xffffff, 0.75); sun.position.set(3, 5, 6); scene.add(sun);
+
+const headMat = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.05 });
+const bodyMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, transparent: true, opacity: 0.55 });
+const darkMat = new THREE.MeshStandardMaterial({ roughness: 0.4 });
+const accentMat = new THREE.LineBasicMaterial();
+const ghostMat = new THREE.LineDashedMaterial({ dashSize: 0.08, gapSize: 0.06, transparent: true, opacity: 0.6 });
+
+const shoulders = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 24), bodyMat);
+shoulders.scale.set(1.9, 0.42, 0.8); shoulders.position.y = -1.0; scene.add(shoulders);
+const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.8, 28), bodyMat);
+neck.position.y = -0.45; scene.add(neck);
+
+const pivot = new THREE.Group(); pivot.position.y = -0.15; scene.add(pivot);
+const head = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 32), headMat);
+head.scale.set(0.8, 1.0, 0.92); head.position.y = 1.0; pivot.add(head);
+const nose = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.3, 20), headMat);
+nose.rotation.x = Math.PI / 2; nose.position.set(0, 0.95, 0.95); pivot.add(nose);
+for (const s of [-1, 1]) {
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.065, 16, 12), darkMat);
+  eye.position.set(0.28 * s, 1.18, 0.8); pivot.add(eye);
+  const ear = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), headMat);
+  ear.scale.set(0.07, 0.2, 0.13); ear.position.set(0.8 * s, 1.02, 0); pivot.add(ear);
+}
+const gazeGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.95, 1.05), new THREE.Vector3(0, 0.95, 2.6)]);
+pivot.add(new THREE.Line(gazeGeo, accentMat));
+const ghost = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.8, 1.05), new THREE.Vector3(0, 0.8, 2.6)]), ghostMat);
+ghost.computeLineDistances(); scene.add(ghost);
+
+function applyTheme() {
+  headMat.color.set(css("--head")); bodyMat.color.set(css("--head"));
+  darkMat.color.set(css("--ink")); accentMat.color.set(css("--accent")); ghostMat.color.set(css("--muted"));
+  drawTrace();
+}
+function resize() {
+  const w = host.clientWidth, h = host.clientHeight;
+  renderer.setSize(w, h, false); renderer.domElement.style.width = w + "px"; renderer.domElement.style.height = h + "px";
+  cam.aspect = w / h; cam.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(host); resize();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+function poseHead() {
+  const { rot, fe, lat } = state.live, m = state.mirror ? 1 : -1;
+  pivot.rotation.set(-fe / DEG, -m * rot / DEG, m * lat / DEG, "YXZ");
+}
+
+/* ---------- Trace ---------- */
+const trace = $("trace"), tctx = trace.getContext("2d");
+function drawTrace() {
+  const dpr = window.devicePixelRatio || 1, w = trace.clientWidth, h = trace.clientHeight;
+  if (trace.width !== Math.round(w * dpr)) { trace.width = Math.round(w * dpr); trace.height = Math.round(h * dpr); }
+  tctx.setTransform(dpr, 0, 0, dpr, 0, 0); tctx.clearRect(0, 0, w, h);
+  const padL = 34, padR = 8, padT = 6, padB = 6, pw = w - padL - padR, ph = h - padT - padB;
+  const y = (v) => padT + ph / 2 - (v / 90) * (ph / 2);
+  tctx.font = "10px IBM Plex Mono, monospace"; tctx.fillStyle = css("--muted"); tctx.textAlign = "right"; tctx.textBaseline = "middle";
+  for (const g of [90, 45, 0, -45, -90]) {
+    tctx.strokeStyle = css("--line"); tctx.lineWidth = g === 0 ? 1.2 : 0.6;
+    tctx.beginPath(); tctx.moveTo(padL, y(g)); tctx.lineTo(w - padR, y(g)); tctx.stroke();
+    tctx.fillText(`${g}°`, padL - 6, y(g));
+  }
+  const now = performance.now(), span = 10000, H = state.hist;
+  [["rot", "--s1"], ["fe", "--s2"], ["lat", "--s3"]].forEach(([k, c]) => {
+    tctx.strokeStyle = css(c); tctx.lineWidth = 1.8; tctx.beginPath(); let started = false;
+    for (const s of H) {
+      if (!s.ok) { started = false; continue; }
+      const x = padL + pw * (1 - (now - s.t) / span), yy = y(Math.max(-90, Math.min(90, s[k])));
+      if (!started) { tctx.moveTo(x, yy); started = true; } else tctx.lineTo(x, yy);
+    }
+    tctx.stroke();
+  });
+}
+
+/* ---------- Pose math ---------- */
+function rotFromMatrix(d) {
+  // Detect layout: translation lives in d[12..14] (column-major) or d[3,7,11] (row-major).
+  const colMajor = Math.abs(d[3]) + Math.abs(d[7]) + Math.abs(d[11]) < 1e-6;
+  const at = (r, c) => colMajor ? d[c * 4 + r] : d[r * 4 + c];
+  const R = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let c = 0; c < 3; c++) {
+    const n = Math.hypot(at(0, c), at(1, c), at(2, c)) || 1;
+    for (let r = 0; r < 3; r++) R[r][c] = at(r, c) / n;
+  }
+  return R;
+}
+function relative(R0, R) { // M = R0^T R : current head axes expressed in the neutral head frame
+  const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) { let s = 0; for (let k = 0; k < 3; k++) s += R0[k][i] * R[k][j]; M[i][j] = s; }
+  return M;
+}
+function angles(M) {
+  const f = [M[0][2], M[1][2], M[2][2]], u = [M[0][1], M[1][1], M[2][1]];
+  const rot = Math.atan2(f[0], f[2]) * DEG;
+  const fe = Math.atan2(f[1], Math.hypot(f[0], f[2])) * DEG;
+  // Undo yaw before reading lateral tilt from the up vector
+  const yr = Math.atan2(f[0], f[2]), ux = u[0] * Math.cos(yr) - u[2] * Math.sin(yr);
+  const lat = Math.atan2(ux, u[1]) * DEG;
+  return { rot, fe, lat };
+}
+
+/* ---------- Main loop ---------- */
+let landmarker = null, video = $("video"), lastVT = -1, t0 = performance.now();
+function pushHist(ok) {
+  const now = performance.now();
+  state.hist.push({ t: now, ok, ...state.live });
+  while (state.hist.length && now - state.hist[0].t > 10000) state.hist.shift();
+}
+function updateNoise() {
+  const now = performance.now(), recent = state.hist.filter((s) => s.ok && now - s.t < 1000);
+  ["rot", "fe", "lat"].forEach((k, i) => {
+    if (recent.length < 8 || state.mode !== "live") { $("n" + i).textContent = "–"; return; }
+    const m = recent.reduce((a, s) => a + s[k], 0) / recent.length;
+    const sd = Math.sqrt(recent.reduce((a, s) => a + (s[k] - m) ** 2, 0) / recent.length);
+    $("n" + i).textContent = `±${sd.toFixed(2)}°`;
+  });
+}
+function setStatus(st, text) { const c = $("status"); c.dataset.state = st; c.querySelector("span").textContent = text; }
+function logLoss() {
+  const lv = state.lastValid; if (!lv) return;
+  const ax = AXES.reduce((a, b) => (Math.abs(lv[b.key]) > Math.abs(lv[a.key]) ? b : a));
+  const v = lv[ax.key]; if (Math.abs(v) < 15) return;
+  const li = document.createElement("li");
+  li.innerHTML = `<strong>Tracking lost</strong> at ${Math.abs(v).toFixed(0)}° ${v > 0 ? ax.pos : ax.neg} · ${ax.name.toLowerCase()}`;
+  const log = $("log"); log.prepend(li); while (log.children.length > 5) log.lastChild.remove();
+}
+
+function frame() {
+  const now = performance.now();
+  if (state.mode === "demo") {
+    const t = (now - t0) / 1000;
+    state.live = { rot: 55 * Math.sin(t * 0.55), fe: 22 * Math.sin(t * 0.37 + 1), lat: 12 * Math.sin(t * 0.46 + 2) };
+    pushHist(true);
+  } else if (landmarker && video.readyState >= 2 && video.currentTime !== lastVT) {
+    lastVT = video.currentTime;
+    const res = landmarker.detectForVideo(video, now);
+    const mat = res.facialTransformationMatrixes && res.facialTransformationMatrixes[0];
+    if (mat) {
+      const R = rotFromMatrix(mat.data);
+      if (!state.R0) { state.R0 = R; }
+      const a = angles(relative(state.R0, R));
+      // Sign check against 2D landmarks: nose tip vs face-edge midpoint in the raw (unmirrored) image.
+      const lm = res.faceLandmarks[0];
+      if (lm && Math.abs(a.rot) > 12 && state.signVotes < 40) {
+        const off = lm[1].x - (lm[234].x + lm[454].x) / 2; // image-right = subject's left
+        const agree = Math.sign(off) === Math.sign(a.rot);
+        state.signVotes++; if (!agree) state.xVotesAgainst = (state.xVotesAgainst || 0) + 1;
+        if (state.signVotes === 40) state.xSign = state.xVotesAgainst > 20 ? -1 : 1;
+      }
+      const s = state.xSign;
+      state.live = { rot: s * a.rot, fe: a.fe, lat: s * a.lat };
+      for (const ax of AXES) {
+        const v = state.live[ax.key], mx = state.max[ax.key];
+        if (v < 0) mx[0] = Math.max(mx[0], -v); else mx[1] = Math.max(mx[1], v);
+      }
+      if (!state.tracking) setStatus("tracking", "Tracking");
+      state.tracking = true; state.lastValid = { ...state.live };
+      state.samples.push([((now - state.startT) / 1000).toFixed(3), ...["rot", "fe", "lat"].map((k) => state.live[k].toFixed(2))]);
+      if (state.samples.length > 20000) state.samples.shift();
+      pushHist(true);
+    } else {
+      if (state.tracking) { logLoss(); setStatus("lost", "Face lost"); }
+      state.tracking = false; pushHist(false);
+    }
+  }
+  poseHead(); renderGauges(); drawTrace(); updateNoise();
+  renderer.render(scene, cam);
+  requestAnimationFrame(frame);
+}
+
+/* ---------- Controls ---------- */
+function showErr(msg) { const e = $("err"); e.textContent = msg; e.hidden = false; }
+$("btnStart").addEventListener("click", async () => {
+  $("btnStart").disabled = true; $("err").hidden = true;
+  setStatus("loading", "Loading face model…");
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("This browser blocks camera access here. Open the file in Chrome, or serve it over https.");
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    video.srcObject = stream; await video.play(); $("ph").hidden = true;
+    const { FaceLandmarker, FilesetResolver } = await import(`${MP}/vision_bundle.mjs`);
+    const files = await FilesetResolver.forVisionTasks(`${MP}/wasm`);
+    const opts = (delegate) => ({ baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: "VIDEO", numFaces: 1, outputFacialTransformationMatrixes: true });
+    try { landmarker = await FaceLandmarker.createFromOptions(files, opts("GPU")); }
+    catch { landmarker = await FaceLandmarker.createFromOptions(files, opts("CPU")); }
+    state.mode = "live"; state.R0 = null; state.startT = performance.now(); state.hist = []; state.samples = [];
+    resetMax(); $("demoTag").hidden = true; $("btnZero").disabled = false; $("btnCsv").disabled = false;
+    $("btnStart").textContent = "Camera on";
+    setStatus("lost", "Looking for a face…");
+  } catch (e) {
+    $("btnStart").disabled = false; setStatus("idle", "Demo motion");
+    showErr(e.name === "NotAllowedError" ? "Camera access is blocked here. Previews inside apps and local files on iPhone/iPad can't use the camera. Open this page in Chrome on a computer, or host it over https and open it in Safari." : (e.message || String(e)));
+  }
+});
+function resetMax() { state.max = { rot: [0, 0], fe: [0, 0], lat: [0, 0] }; $("log").innerHTML = ""; }
+$("btnReset").addEventListener("click", resetMax);
+$("btnZero").addEventListener("click", () => { state.R0 = null; resetMax(); });
+$("mirror").addEventListener("change", (e) => { state.mirror = e.target.checked; $("inset").classList.toggle("mirror", state.mirror); });
+$("btnCsv").addEventListener("click", () => {
+  const lines = ["time_s,rotation_deg_posL,flexext_deg_posExt,lateral_deg_posL", ...state.samples.map((r) => r.join(","))];
+  const mx = AXES.map((a) => `# max ${a.name}: ${a.neg} ${state.max[a.key][0].toFixed(1)}, ${a.pos} ${state.max[a.key][1].toFixed(1)}`);
+  const blob = new Blob([[...mx, ...lines].join("\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `sensr-rom-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+applyTheme();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
