@@ -97,6 +97,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .gauge + .gauge { border-top: 1px solid var(--line); }
 @media (max-width: 420px) { .gauge { grid-template-columns: minmax(0, 1fr); } }
 .gauge svg { width: 100%; max-width: 280px; height: auto; display: block; }
+.gauge svg.vert { max-width: 176px; justify-self: center; }
+.video-inset.floating {
+  position: fixed; top: auto; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  width: 132px; max-width: none; z-index: 50; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+}
+@media (prefers-reduced-motion: no-preference) { .video-inset.floating { animation: pip-in 160ms ease-out; } }
+@keyframes pip-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .g-title { font: 600 13px var(--font-display); letter-spacing: 0.02em; display: flex; align-items: center; gap: 8px; }
 .g-title b { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
 .g-live { font: 600 34px/1.05 var(--font-data); font-variant-numeric: tabular-nums; margin: 4px 0 6px; }
@@ -213,37 +220,47 @@ const state = {
   hist: [], samples: [], lastValid: null, mirror: true,
 };
 
-/* ---------- Gauges (SVG protractors) ---------- */
-const CX = 130, CY = 128, RAD = 100;
-const pt = (v, r) => [CX + r * Math.sin(v / DEG), CY - r * Math.cos(v / DEG)];
-function arcPath(a, b, r) {
-  const [x1, y1] = pt(a, r), [x2, y2] = pt(b, r);
-  return `M${x1.toFixed(1)} ${y1.toFixed(1)} A${r} ${r} 0 ${Math.abs(b - a) > 180 ? 1 : 0} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+/* ---------- Gauges (SVG protractors) ----------
+   Rotation and lateral flexion read left/right (patient faces you). Flexion/extension is drawn
+   as a side view: extension up, flexion down. "d" is the display angle: -90 = start end, +90 = far end. */
+const GEO = {
+  h: { cx: 130, cy: 128, R: 100, w: 260, h: 146, sweep: 1, pt(d, r) { return [this.cx + r * Math.sin(d / DEG), this.cy - r * Math.cos(d / DEG)]; } },
+  v: { cx: 44, cy: 118, R: 96, w: 170, h: 238, sweep: 0, pt(d, r) { return [this.cx + r * Math.cos(d / DEG), this.cy - r * Math.sin(d / DEG)]; } },
+};
+AXES.forEach((ax) => { ax.g = ax.key === "fe" ? GEO.v : GEO.h; ax.negEndIsPos = ax.g === GEO.h && ax.leftIsPos; });
+function arcPath(g, a, b, r) {
+  const [x1, y1] = g.pt(a, r), [x2, y2] = g.pt(b, r);
+  return `M${x1.toFixed(1)} ${y1.toFixed(1)} A${r} ${r} 0 ${Math.abs(b - a) > 180 ? 1 : 0} ${g.sweep} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
 }
+const TXT = 'font-family="IBM Plex Mono, monospace"';
 function buildGauge(ax) {
-  // display angle v: negative = left of arc
-  const leftRef = ax.leftIsPos ? ax.refPos : ax.refNeg, rightRef = ax.leftIsPos ? ax.refNeg : ax.refPos;
-  const leftLbl = ax.leftIsPos ? ax.pos : ax.neg, rightLbl = ax.leftIsPos ? ax.neg : ax.pos;
+  const g = ax.g, R = g.R, P = ax.negEndIsPos;
+  const negRef = P ? ax.refPos : ax.refNeg, posRef = P ? ax.refNeg : ax.refPos;
+  const negLbl = P ? ax.pos : ax.neg, posLbl = P ? ax.neg : ax.pos;
   let ticks = "", labels = "";
-  for (let v = -90; v <= 90; v += 10) {
-    const long = v % 30 === 0;
-    const [x1, y1] = pt(v, RAD), [x2, y2] = pt(v, RAD - (long ? 10 : 5));
+  for (let d = -90; d <= 90; d += 10) {
+    const long = d % 30 === 0;
+    const [x1, y1] = g.pt(d, R), [x2, y2] = g.pt(d, R - (long ? 10 : 5));
     ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--muted)" stroke-width="${long ? 1.4 : 0.8}"/>`;
-    if (long) { const [lx, ly] = pt(v, RAD - 20); labels += `<text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono, monospace">${Math.abs(v)}</text>`; }
+    if (long) { const [lx, ly] = g.pt(d, R - 20); labels += `<text x="${lx.toFixed(1)}" y="${(ly + 3).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--muted)" ${TXT}>${Math.abs(d)}</text>`; }
   }
+  const ends = g === GEO.h
+    ? `<text x="${g.cx - R - 4}" y="${g.cy + 16}" text-anchor="start" font-size="10" font-weight="600" fill="var(--ink)" ${TXT}>${negLbl}</text>
+       <text x="${g.cx + R + 4}" y="${g.cy + 16}" text-anchor="end" font-size="10" font-weight="600" fill="var(--ink)" ${TXT}>${posLbl}</text>`
+    : `<text x="${g.cx}" y="${g.cy + R + 18}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--ink)" ${TXT}>${negLbl}</text>
+       <text x="${g.cx}" y="${g.cy - R - 8 < 10 ? 10 : g.cy - R - 8}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--ink)" ${TXT}>${posLbl}</text>`;
+  const [nx, ny] = g.pt(0, R - 14);
   const el = document.createElement("div");
   el.className = "gauge";
   el.innerHTML = `
-    <svg viewBox="0 0 260 146" role="img" aria-label="${ax.name} gauge">
-      <path d="${arcPath(-leftRef, rightRef, RAD + 7)}" stroke="var(--ref)" stroke-width="12" fill="none"/>
-      <path d="${arcPath(-90, 90, RAD)}" stroke="var(--line)" stroke-width="1.5" fill="none"/>
-      ${ticks}${labels}
-      <text x="${CX - RAD - 4}" y="${CY + 16}" text-anchor="start" font-size="10" font-weight="600" fill="var(--ink)" font-family="IBM Plex Mono, monospace">${leftLbl}</text>
-      <text x="${CX + RAD + 4}" y="${CY + 16}" text-anchor="end" font-size="10" font-weight="600" fill="var(--ink)" font-family="IBM Plex Mono, monospace">${rightLbl}</text>
-      <polygon class="mL" points="0,0" fill="var(${ax.color})"/>
-      <polygon class="mR" points="0,0" fill="var(${ax.color})"/>
-      <line class="needle" x1="${CX}" y1="${CY}" x2="${CX}" y2="${CY - RAD + 14}" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round"/>
-      <circle cx="${CX}" cy="${CY}" r="5" fill="var(--ink)"/>
+    <svg class="${g === GEO.v ? "vert" : ""}" viewBox="0 0 ${g.w} ${g.h}" role="img" aria-label="${ax.name} gauge">
+      <path d="${arcPath(g, -negRef, posRef, R + 7)}" stroke="var(--ref)" stroke-width="12" fill="none"/>
+      <path d="${arcPath(g, -90, 90, R)}" stroke="var(--line)" stroke-width="1.5" fill="none"/>
+      ${ticks}${labels}${ends}
+      <polygon class="mN" points="0,0" fill="var(${ax.color})"/>
+      <polygon class="mP" points="0,0" fill="var(${ax.color})"/>
+      <line class="needle" x1="${g.cx}" y1="${g.cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="var(--ink)" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="${g.cx}" cy="${g.cy}" r="5" fill="var(--ink)"/>
     </svg>
     <div>
       <div class="g-title"><b style="background:var(${ax.color})"></b>${ax.name}</div>
@@ -253,22 +270,22 @@ function buildGauge(ax) {
   ax.el = el; $("gauges").appendChild(el);
 }
 AXES.forEach(buildGauge);
-const marker = (v) => { const [a, b] = pt(v - 3, RAD + 15), [c, d] = pt(v + 3, RAD + 15), [e, f] = pt(v, RAD + 4); return `${a},${b} ${c},${d} ${e},${f}`; };
+const marker = (g, d) => { const [a, b] = g.pt(d - 3, g.R + 15), [c, e] = g.pt(d + 3, g.R + 15), [f, h] = g.pt(d, g.R + 4); return `${a},${b} ${c},${e} ${f},${h}`; };
 function renderGauges() {
   for (const ax of AXES) {
-    const val = state.live[ax.key], disp = ax.leftIsPos ? -val : val;
-    const v = Math.max(-90, Math.min(90, disp));
-    const [x, y] = pt(v, RAD - 14);
+    const g = ax.g, P = ax.negEndIsPos, val = state.live[ax.key];
+    const d = Math.max(-90, Math.min(90, P ? -val : val));
+    const [x, y] = g.pt(d, g.R - 14);
     const n = ax.el.querySelector(".needle"); n.setAttribute("x2", x.toFixed(1)); n.setAttribute("y2", y.toFixed(1));
     ax.el.querySelector(".v").textContent = `${Math.abs(val).toFixed(1)}°`;
     ax.el.querySelector(".d").textContent = Math.abs(val) < 0.5 ? "" : (val > 0 ? ax.pos : ax.neg);
     const [mn, mp] = state.max[ax.key];
     ax.el.querySelector(".xn").textContent = `${mn.toFixed(1)}°`;
     ax.el.querySelector(".xp").textContent = `${mp.toFixed(1)}°`;
-    const leftMax = ax.leftIsPos ? mp : mn, rightMax = ax.leftIsPos ? mn : mp;
-    const mL = ax.el.querySelector(".mL"), mR = ax.el.querySelector(".mR");
-    mL.setAttribute("points", marker(-Math.min(90, leftMax))); mL.style.opacity = leftMax > 0.5 ? 1 : 0;
-    mR.setAttribute("points", marker(Math.min(90, rightMax))); mR.style.opacity = rightMax > 0.5 ? 1 : 0;
+    const negMax = P ? mp : mn, posMax = P ? mn : mp;
+    const mN = ax.el.querySelector(".mN"), mP = ax.el.querySelector(".mP");
+    mN.setAttribute("points", marker(g, -Math.min(90, negMax))); mN.style.opacity = negMax > 0.5 ? 1 : 0;
+    mP.setAttribute("points", marker(g, Math.min(90, posMax))); mP.style.opacity = posMax > 0.5 ? 1 : 0;
   }
 }
 
@@ -535,6 +552,11 @@ $("btnCsv").addEventListener("click", () => {
   a.download = `sensr-rom-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 });
+
+/* Floating camera preview: follows the scroll once the 3D stage is mostly off-screen */
+new IntersectionObserver(([e]) => {
+  $("inset").classList.toggle("floating", state.mode === "live" && e.intersectionRatio < 0.45);
+}, { threshold: [0, 0.45, 1] }).observe(document.querySelector(".stage"));
 
 applyTheme();
 requestAnimationFrame(frame);
